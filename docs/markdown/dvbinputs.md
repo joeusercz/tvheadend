@@ -8,7 +8,7 @@ Contents                                                         | Description
 [Networks](class/mpegts_network)                                 | Where you configure networks
 [Muxes](class/mpegts_mux)                                        | Where you configure multiplexes
 [Services](class/mpegts_service)                                 | Discovered service(s) management
-[Mux Schedulers](class/mpegts_mux_sched)                         | Where you configure mux schedulers - schedule tvheadend to tune to a specific mux to receive different types of data, EMMs, EIT etc
+[Mux OR Service Schedulers](class/mpegts_mux_sched)                         | Where you configure mux/service schedulers - schedule tvheadend to tune to a specific mux OR service to receive different types of data, EMMs, EIT etc
 
 ---
 

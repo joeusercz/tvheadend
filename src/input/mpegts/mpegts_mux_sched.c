@@ -58,10 +58,30 @@ mpegts_mux_sched_set_timer ( mpegts_mux_sched_t *mms )
   }
 }
 
+static int
+mpegts_mux_sched_class_validate ( mpegts_mux_sched_t *mms )
+{
+  if (mms->mms_cronstr && service_find_by_uuid(mms->mms_service ?: "")) {
+    free(mms->mms_mux);
+    mms->mms_mux = NULL;
+  } else if (mms->mms_cronstr && mpegts_mux_find(mms->mms_mux ?: "")) {
+    return 1;
+  } else {
+    return 0;
+  }
+  return 1;
+}
+
 static void
 mpegts_mux_sched_class_changed ( idnode_t *in )
 {
   mpegts_mux_sched_t *mms = (mpegts_mux_sched_t*)in;
+
+  /* Validate  */
+  if (!mpegts_mux_sched_class_validate (mms)) {
+    mpegts_mux_sched_delete(mms, 1);
+    return;
+  }
 
   /* Update timer */
   mpegts_mux_sched_set_timer(mms);
@@ -102,6 +122,24 @@ mpegts_mux_sched_class_mux_list ( void *o, const char *lang )
   return m;
 }
 
+static htsmsg_t *
+mpegts_mux_sched_class_service_list ( void *o, const char *lang )
+{
+  htsmsg_t *m, *p;
+
+  p = htsmsg_create_map();
+  htsmsg_add_str (p, "class", "mpegts_service");
+  htsmsg_add_bool(p, "enum",  1);
+
+  m = htsmsg_create_map();
+  htsmsg_add_str (m, "type",  "api");
+  htsmsg_add_str (m, "uri",   "idnode/load");
+  htsmsg_add_str (m, "event", "mpegts_service");
+  htsmsg_add_msg (m, "params", p);
+  
+  return m;
+}
+
 static int
 mpegts_mux_sched_class_cron_set ( void *p, const void *v )
 {
@@ -125,7 +163,7 @@ PROP_DOC(cron)
 const idclass_t mpegts_mux_sched_class =
 {
   .ic_class      = "mpegts_mux_sched",
-  .ic_caption    = N_("DVB Inputs - Mux Schedulers"),
+  .ic_caption    = N_("DVB Inputs - Mux OR Service Schedulers"),
   .ic_event      = "mpegts_mux_sched",
   .ic_doc        = tvh_doc_mpegts_mux_sched_class,
   .ic_changed    = mpegts_mux_sched_class_changed,
@@ -144,9 +182,17 @@ const idclass_t mpegts_mux_sched_class =
       .type     = PT_STR,
       .id       = "mux",
       .name     = N_("Mux"),
-      .desc     = N_("The mux to play when the entry is triggered."),
+      .desc     = N_("a mux to play when the entry is triggered."),
       .off      = offsetof(mpegts_mux_sched_t, mms_mux),
       .list     = mpegts_mux_sched_class_mux_list,
+    },
+    {
+      .type     = PT_STR,
+      .id       = "service",
+      .name     = N_("Service (overrides mux)"),
+      .desc     = N_("a service to play when the entry is triggered."),
+      .off      = offsetof(mpegts_mux_sched_t, mms_service),
+      .list     = mpegts_mux_sched_class_service_list,
     },
     {
       .type     = PT_STR,
@@ -161,9 +207,10 @@ const idclass_t mpegts_mux_sched_class =
       .type     = PT_INT,
       .id       = "timeout",
       .name     = N_("Timeout (secs)"),
-      .desc     = N_("The length of time (in seconds) to play the mux "
+      .desc     = N_("The length of time (in seconds) to play the mux or service "
                      "(1 hour = 3600)."),
       .off      = offsetof(mpegts_mux_sched_t, mms_timeout),
+      .def.i    = 600,
     },
     {
       .type     = PT_BOOL,
@@ -216,7 +263,8 @@ static streaming_ops_t mpegts_mux_sched_input_ops = {
 static void
 mpegts_mux_sched_timer ( void *p )
 {
-  mpegts_mux_t *mm;
+  mpegts_mux_t *mm = NULL;
+  service_t *s;
   mpegts_mux_sched_t *mms = p;
   time_t nxt;
 
@@ -225,14 +273,17 @@ mpegts_mux_sched_timer ( void *p )
     return;
 
   /* Invalid config (creating?) */
-  if (!mms->mms_mux)
+  if (!mms->mms_mux && !mms->mms_service)
     return;
   
-  /* Find mux */
-  if (!(mm = mpegts_mux_find(mms->mms_mux))) {
-    tvhdebug(LS_MUXSCHED, "mux has been removed, delete sched entry");
-    mpegts_mux_sched_delete(mms, 1);
-    return;
+  /* Find service or mux */
+  if (!(s = service_find_by_uuid(mms->mms_service))) {
+    tvhdebug(LS_MUXSCHED, "service not found, check for mux");
+    if (!(mm = mpegts_mux_find(mms->mms_mux))) {
+      tvhdebug(LS_MUXSCHED, "service and/or mux has been removed, delete scheder entry");
+      mpegts_mux_sched_delete(mms, 1);
+      return;
+    }
   }
 
   /* Start sub */
@@ -241,14 +292,22 @@ mpegts_mux_sched_timer ( void *p )
 
     if (!mms->mms_prch)
       mms->mms_prch = calloc(1, sizeof(*mms->mms_prch));
-    mms->mms_prch->prch_id = mm;
     mms->mms_prch->prch_st = &mms->mms_input;
-
-    mms->mms_sub
-      = subscription_create_from_mux(mms->mms_prch, NULL, mms->mms_weight,
-                                     mms->mms_creator ?: "",
-                                     SUBSCRIPTION_MINIMAL,
-                                     NULL, NULL, NULL, NULL);
+    if (s) {
+      mms->mms_prch->prch_id = s;
+      mms->mms_sub
+        = subscription_create_from_service(mms->mms_prch, NULL, mms->mms_weight,
+                                           mms->mms_creator ?: "",
+                                           SUBSCRIPTION_CONTACCESS,
+                                           NULL, NULL, NULL, NULL);
+    } else {
+      mms->mms_prch->prch_id = mm;
+      mms->mms_sub
+        = subscription_create_from_mux(mms->mms_prch, NULL, mms->mms_weight,  
+                                       mms->mms_creator ?: "",
+                                       SUBSCRIPTION_MINIMAL,
+                                       NULL, NULL, NULL, NULL);
+    }
 
     /* Failed (try-again soon) */
     if (!mms->mms_sub) {
@@ -324,8 +383,7 @@ mpegts_mux_sched_create ( const char *uuid, htsmsg_t *conf )
     idnode_load(&mms->mms_id, conf);
 
   /* Validate */
-  if (!mpegts_mux_find(mms->mms_mux ?: "") ||
-      !mms->mms_cronstr) {
+  if (!mpegts_mux_sched_class_validate (mms)) {
     mpegts_mux_sched_delete(mms, 1);
     return NULL;
   }
@@ -350,6 +408,7 @@ mpegts_mux_sched_delete ( mpegts_mux_sched_t *mms, int delconf )
   idnode_unlink(&mms->mms_id);
   free(mms->mms_cronstr);
   free(mms->mms_mux);
+  free(mms->mms_service);
   free(mms->mms_creator);
   free(mms->mms_prch);
   free(mms);

@@ -418,15 +418,15 @@ tvheadend.mux_sched = function(panel, index)
 {
     tvheadend.idnode_grid(panel, {
         url: 'api/mpegts/mux_sched',
-        titleS: _('Mux Scheduler'),
-        titleP: _('Mux Schedulers'),
+        titleS: _('Mux OR Service Scheduler'),
+        titleP: _('Mux OR Service Schedulers'),
         iconCls: 'muxSchedulers',
         tabIndex: index,
         uilevel: 'expert',
         hidemode: true,
         add: {
             url: 'api/mpegts/mux_sched',
-            titleS: _('Mux Scheduler'),
+            titleS: _('Mux OR Service Scheduler'),
             create: {
                 url: 'api/mpegts/mux_sched/create'
             }

@@ -45,6 +45,7 @@ typedef struct mpegts_mux_sched
   int             mms_enabled;  ///< Enabled
   char           *mms_cronstr;  ///< Cron configuration string
   char           *mms_mux;      ///< Mux UUID
+  char           *mms_service;  ///< Service UUID
   char           *mms_creator;  ///< Creator of entry
   int             mms_timeout;  ///< Timeout (in seconds)
   int             mms_restart;  ///< Restart subscription when overriden
